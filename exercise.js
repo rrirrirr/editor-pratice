@@ -25,6 +25,12 @@ let watcher = null;
 let updateInterval = null;
 let lastContent = '';
 let keystrokes = 0;
+let testTimings = new Map();
+let testKeystrokes = new Map();
+let lastCompletedTestTime = startTime;  // Track when last test was completed
+let lastCompletedTestKeys = 0;          // Track keys when last test completed
+let testCompletionTimes = new Map();    // Track how long each test took
+
 
 function initConfig() {
   try {
@@ -91,24 +97,42 @@ async function validateExercise(fileName, exercise, timerOnly = false) {
   try {
     const content = fs.readFileSync(fileName, 'utf8');
     const result = await exercise.validate(content);
+    const now = Date.now();
 
     process.stdout.write('\x1Bc');
     console.log('=== Progress ===');
-    console.log('Time: ' + ((Date.now() - startTime) / 1000).toFixed(1) + 's');
-    console.log('Keys pressed: ' + keystrokes + '\n');
+    console.log('Total time:', ((now - startTime) / 1000).toFixed(1) + 's');
+    console.log('Total keys:', keystrokes + '\n');
 
     const percentage = Math.round((result.passedTests / result.totalTests) * 100);
-    const barLength = 20;
-    const filledLength = Math.round((percentage / 100) * barLength);
-    const bar = '█'.repeat(filledLength) + '░'.repeat(barLength - filledLength);
-
+    const bar = '█'.repeat(Math.round((percentage / 100) * 20)) + '░'.repeat(20 - Math.round((percentage / 100) * 20));
     console.log(bar + ' ' + percentage + '%\n');
 
     if (result.tests) {
-      result.tests.forEach(test => {
+      for (const test of result.tests) {
         const status = test.passed ? '✓' : '✗';
-        console.log(`${status} ${test.title}`);
-      });
+        let timeStr = '';
+
+
+        if (test.passed) {
+          if (!testCompletionTimes.has(test.title)) {
+            const duration = now - lastCompletedTestTime;
+            const keysDelta = keystrokes - lastCompletedTestKeys;
+            timeStr = ` (+${(duration / 1000).toFixed(1)}s, +${keysDelta} keys)`;
+
+            testCompletionTimes.set(test.title, { duration, keystrokes: keysDelta });
+            lastCompletedTestTime = now;
+            lastCompletedTestKeys = keystrokes;
+          } else {
+            const testData = testCompletionTimes.get(test.title)
+            timeStr = ` (+${(testData.duration / 1000).toFixed(1)}s, +${testData.keystrokes} keys)`;
+          }
+        }
+        console.log(`${status} ${test.title}${timeStr}`);
+        if (test.message) {
+          console.log('  ' + test.message);
+        }
+      }
     }
 
     if (!timerOnly && result.error) {
@@ -117,7 +141,7 @@ async function validateExercise(fileName, exercise, timerOnly = false) {
 
     if (result.isComplete) {
       console.log('\n🎉 All tests passing! Time: ' +
-        ((Date.now() - startTime) / 1000).toFixed(1) + 's');
+        ((now - startTime) / 1000).toFixed(1) + 's');
       cleanup();
       process.exit(0);
     }
@@ -159,6 +183,12 @@ async function start(exercisePath, editorCmd, terminalCmd) {
     fs.writeFileSync(fullPath, exercise.generate());
     lastContent = exercise.generate();
     startTime = Date.now();
+    keystrokes = 0;
+    testTimings.clear();
+    testKeystrokes.clear();
+    testCompletionTimes.clear();
+    lastCompletedTestTime = Date.now();  // Add this
+    lastCompletedTestKeys = 0;           // And this
 
     if (!openInTerminal(config.editor, fullPath)) {
       console.error('Failed to open editor');
@@ -185,6 +215,37 @@ async function start(exercisePath, editorCmd, terminalCmd) {
   }
 }
 
+async function showExerciseInfo(exercise) {
+  console.clear();
+  const width = process.stdout.columns || 80;
+  console.log('╭' + '─'.repeat(width - 2) + '╮');
+  console.log(`│ ${exercise.title.padEnd(width - 4)} │`);
+  console.log('├' + '─'.repeat(width - 2) + '┤');
+
+  if (exercise.description) {
+    const lines = exercise.description.split('\n');
+    lines.forEach(line => {
+      console.log(`│ ${line.padEnd(width - 4)} │`);
+    });
+  }
+
+  console.log('╰' + '─'.repeat(width - 2) + '╯');
+  console.log('\nPress Enter to start or Esc to go back');
+
+  return new Promise((resolve) => {
+    const handler = (key) => {
+      if (key === '\r') {
+        process.stdin.removeListener('data', handler);
+        resolve(true);
+      } else if (key === '\u001b') {
+        process.stdin.removeListener('data', handler);
+        resolve(false);
+      }
+    };
+    process.stdin.on('data', handler);
+  });
+}
+
 async function showMenu() {
   if (!fs.existsSync(EXERCISES_DIR)) {
     console.error(`Directory '${EXERCISES_DIR}' not found`);
@@ -197,7 +258,8 @@ async function showMenu() {
       const exercise = await import(path.resolve(EXERCISES_DIR, f));
       return {
         file: f,
-        title: exercise.title || f
+        title: exercise.title || f,
+        description: exercise.description || ''
       };
     });
 
@@ -233,9 +295,15 @@ async function showMenu() {
         selectedIndex = (selectedIndex + 1) % exercises.length;
         render();
       } else if (key === '\r') { // Enter
-        process.stdin.setRawMode(false);
-        process.stdin.pause();
-        resolve(exercises[selectedIndex].file);
+        showExerciseInfo(exercises[selectedIndex]).then(shouldStart => {
+          if (shouldStart) {
+            process.stdin.setRawMode(false);
+            process.stdin.pause();
+            resolve(exercises[selectedIndex].file);
+          } else {
+            render();
+          }
+        });
       }
     });
   });
