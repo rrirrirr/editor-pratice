@@ -1,0 +1,11 @@
+{
+  "editor": "hx",
+  "terminal": "alacritty",
+  "terminals": {
+    "alacritty": ["alacritty", "-e"],
+    "gnome-terminal": ["gnome-terminal", "--"],
+    "konsole": ["konsole", "-e"],
+    "kitty": ["kitty"],
+    "xterm": ["xterm", "-e"]
+  }
+}
