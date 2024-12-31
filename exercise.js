@@ -264,6 +264,7 @@ async function showMenu() {
     });
 
   const exercises = await Promise.all(files);
+  exercises.sort((a, b) => a.title.localeCompare(b.title));
   let selectedIndex = 0;
 
   if (process.stdin.isTTY) {
