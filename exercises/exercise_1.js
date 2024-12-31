@@ -1,4 +1,4 @@
-export const title = "Exercise: 1";
+export const title = "Exercise 1 - Text selection and navigation";
 export const description = `An exercise focusing on text selection and navigations techniques:
 
 GOALS:
